@@ -2,15 +2,72 @@
 // @name         Twitch Chat mute +
 // @author       imouto
 // @namespace    https://greasyfork.org/users/imouto
-// @version      1.0
+// @version      1.1
 // @description ワンクリックでユーザーをその場で即座にミュートします。ミュート時はコメントも一緒に消します。おまけ機能アリ（ NGワード / ニコニコ弾幕 / ボーナス自動回収 など ）
 // @match        https://www.twitch.tv/*
+// @match        https://dokorisu.2saku.tech/*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_addValueChangeListener
 // @run-at       document-end
 // @license      MIT
 // ==/UserScript==
 
 (function () {
   'use strict';
+
+  /* ================================================================
+     どこリス連携
+     ・Twitch側：ミュートリストの名前を Shift / Ctrl を押しながらクリックすると、
+       どこリスのユーザー別統計を「今のタブから移動せずに」開く
+     ・どこリスを別タブで開いている間はこのスクリプトが生存を通知していて、
+       リクエストが来たら新しいタブを開かず、そのタブの中で統計ページへ移動する
+  ================================================================ */
+  const DOKORISU_REQ_KEY   = 'tm_dokorisu_req_v1';
+  const DOKORISU_ALIVE_KEY = 'tm_dokorisu_alive_v1';
+  function buildDokorisuUrl(login) {
+    const y = new Date().getFullYear();
+    return 'https://dokorisu.2saku.tech/users/stats?platform=twitch&year=' + y +
+           '&q=' + encodeURIComponent(login);
+  }
+  if (location.hostname === 'dokorisu.2saku.tech') {
+    const beat = () => { try { GM_setValue(DOKORISU_ALIVE_KEY, Date.now()); } catch (e) {} };
+    beat();
+    setInterval(beat, 5000);
+    try {
+      GM_addValueChangeListener(DOKORISU_REQ_KEY, (name, oldValue, newValue) => {
+        try {
+          const req = JSON.parse(newValue || '{}');
+          if (req && req.login && Date.now() - (req.ts || 0) < 60000) {
+            location.href = buildDokorisuUrl(req.login);
+          }
+        } catch (e) {}
+      });
+    } catch (e) {}
+    return; // どこリス側では本体（Twitch用）は動かさない
+  }
+  function openDokorisuSearch(login) {
+    const url = buildDokorisuUrl(login);
+    let reused = false;
+    try {
+      if (typeof GM_setValue === 'function') {
+        GM_setValue(DOKORISU_REQ_KEY, JSON.stringify({ login, ts: Date.now() }));
+        const alive = (typeof GM_getValue === 'function' && GM_getValue(DOKORISU_ALIVE_KEY, 0)) || 0;
+        reused = Date.now() - alive < 12000;
+      }
+    } catch (e) {}
+    if (!reused) {
+      // Ctrl+クリック相当で開くと、Chromeでは後ろのタブで開いて今のタブから移動しない
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+      setTimeout(() => { try { a.remove(); } catch (e) {} }, 100);
+    }
+    showToast(reused ? `どこリスで検索しました：${login}` : `どこリスを別タブで開きました：${login}`);
+  }
 
   /* ================================================================
      UI位置調整リスト
@@ -210,6 +267,7 @@
   const NG_WORDS_KEY   = 'tm_ng_words_v1';      // NGワード一覧（文字列の配列。/〜/ 形式は正規表現として扱う）
   const CHAR_LIMIT_KEY = 'tm_char_limit_v1';    // 文字数制限の上限（0＝OFF。これより長いコメントを隠す）
   const REPEAT_HIDE_KEY = 'tm_repeat_hide_enabled_v1'; // 繰り返しコメント非表示のON/OFF（デフォルトON）
+  const ASCII_ART_HIDE_KEY = 'tm_ascii_art_hide_v1'; // アスキーアート非表示のON/OFF（デフォルトON）
   const SUB_ONLY_KEY    = 'tm_sub_only_mode_v1';       // サブスク限定モードのON/OFF（デフォルトOFF）
   const STATS_KEY       = 'tm_filter_stats_v1';        // フィルターのヒット数（今日/累計）
   const CAROUSEL_HINT_KEY = 'tm_carousel_hint_done_v1'; // 左下カルーセルのヒントアニメーションを見せ終わったか
@@ -1834,6 +1892,21 @@
     return false;
   }
 
+  // アスキーアート判定：点字（⣿⠋等）・ブロック・罫線・図形の文字が
+  //   10文字以上あり、全体の3割以上を占めていたらアスキーアートとみなす。
+  //   絵文字のアート（🟥の並び等）は対象外（「点々した文字」だけを見る）。
+  const ASCII_ART_CHAR_RE = /[\u2800-\u28FF\u2580-\u259F\u2500-\u257F\u25A0-\u25FF]/g;
+  function isAsciiArtComment(text) {
+    if (!text) return false;
+    const s = String(text).replace(/\s+/g, '');
+    if (s.length < 10) return false;
+    const m = s.match(ASCII_ART_CHAR_RE);
+    const n = m ? m.length : 0;
+    return n >= 10 && n / s.length >= 0.3;
+  }
+  function isAsciiArtHideEnabled() { return isFeatureEnabled(ASCII_ART_HIDE_KEY, true); }
+  function setAsciiArtHideEnabled(v) { setFeatureEnabled(ASCII_ART_HIDE_KEY, v); }
+
   // NGワード / 文字数 / 繰り返し のいずれかに引っかかるか（理由つき）
   //   繰り返し判定だけは plainText（スタンプを除いた生の文字）で判定する。
   //   スタンプだけのコメントは plainText が空になるため、連投されても消えない。
@@ -1842,6 +1915,7 @@
     if (matchNgWord(text)) return 'ng';
     if (isOverCharLimit(text)) return 'char';
     if (isRepeatHideEnabled() && isRepeatedComment(plainText != null ? plainText : text)) return 'repeat';
+    if (isAsciiArtHideEnabled() && isAsciiArtComment(plainText != null ? plainText : text)) return 'aa';
     return null;
   }
   function isContentFiltered(text, plainText) {
@@ -1849,8 +1923,8 @@
   }
 
   /* ---------- フィルターのヒット数（今日 / 累計） ---------- */
-  const FILTER_STAT_KINDS = ['question', 'ng', 'char', 'repeat', 'subonly'];
-  const FILTER_STAT_LABELS = { question: '？のみ', ng: 'NGワード', char: '文字数制限', repeat: '繰り返し', subonly: 'サブスク限定' };
+  const FILTER_STAT_KINDS = ['question', 'ng', 'char', 'repeat', 'aa', 'subonly'];
+  const FILTER_STAT_LABELS = { question: '？のみ', ng: 'NGワード', char: '文字数制限', repeat: '繰り返し', aa: 'アスキーアート', subonly: 'サブスク限定' };
   function emptyStatCounts() {
     const o = {};
     FILTER_STAT_KINDS.forEach(k => { o[k] = 0; });
@@ -1883,9 +1957,9 @@
   }
 
   /* ---------- フィルターで非表示にしたコメントの実例（メモリのみ） ----------
-     文字数制限 / 繰り返し の2種だけを、種類ごとに新しい順で最大20件覚える。
+     文字数制限 / 繰り返し / アスキーアート の3種を、種類ごとに新しい順で最大20件覚える。
      統計の名前を押すとオーバーレイで中身を確認できる（パネルのレイアウトは崩さない）。 */
-  const _filterSamples = { char: [], repeat: [] };
+  const _filterSamples = { char: [], repeat: [], aa: [] };
   function recordFilterSample(kind, user, text) {
     const arr = _filterSamples[kind];
     if (!arr) return;
@@ -2181,7 +2255,7 @@
           hideVodChatLine(chatLine);
           if (!wasHidden) {
             countFilterHit(filterReason);
-            if (filterReason === 'char' || filterReason === 'repeat') recordFilterSample(filterReason, display, rawMsgText);
+            if (filterReason === 'char' || filterReason === 'repeat' || filterReason === 'aa') recordFilterSample(filterReason, display, rawMsgText);
           }
           if (chatLine.dataset) chatLine.dataset.tmProcessed = '1';
           continue;
@@ -4693,6 +4767,8 @@ a[href*="help.twitch.tv/s/article/plus-program"] {
 
     nameContainer.addEventListener('click', (e) => {
       e.stopPropagation();
+      // Shift / Ctrl を押しながらクリック → どこリスでこのユーザーを検索
+      if (e.shiftKey || e.ctrlKey || e.metaKey) { openDokorisuSearch(user); return; }
       const flashOk  = () => { nameContainer.classList.add('tm-copied'); setTimeout(() => nameContainer.classList.remove('tm-copied'), 150); };
       const flashErr = () => { nameContainer.style.outline = '1px solid rgba(255,80,80,0.9)'; setTimeout(() => { nameContainer.style.outline = ''; }, 300); };
       copyTextToClipboard(user).then(flashOk, flashErr);
@@ -5538,6 +5614,9 @@ a[href*="help.twitch.tv/s/article/plus-program"] {
     frag.appendChild(buildSettingCheckRow('繰り返しコメントを非表示',
       isRepeatHideEnabled, setRepeatHideEnabled,
       () => safe(() => syncAllExistingChatRows())));
+    frag.appendChild(buildSettingCheckRow('アスキーアートを非表示',
+      isAsciiArtHideEnabled, setAsciiArtHideEnabled,
+      () => safe(() => syncAllExistingChatRows())));
     frag.appendChild(buildSettingCheckRow('サブスク限定モード',
       isSubOnlyModeEnabled, setSubOnlyModeEnabled,
       () => safe(() => syncAllExistingChatRows())));
@@ -5611,8 +5690,8 @@ a[href*="help.twitch.tv/s/article/plus-program"] {
       r.className = 'tm-filter-stats-row';
       const l = document.createElement('span');
       l.textContent = FILTER_STAT_LABELS[kind];
-      // 文字数制限 / 繰り返し は、名前を押すと非表示にした実例が見られる
-      if (kind === 'char' || kind === 'repeat') {
+      // 文字数制限 / 繰り返し / アスキーアート は、名前を押すと非表示にした実例が見られる
+      if (kind === 'char' || kind === 'repeat' || kind === 'aa') {
         l.className = 'tm-filter-stat-link';
         l.title = '非表示にしたコメントを見る';
         l.addEventListener('click', (ev) => { ev.stopPropagation(); showFilterSamples(kind, l); });
