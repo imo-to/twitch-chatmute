@@ -8,9 +8,9 @@ Twitchのチャットで、ユーザーをワンクリックでミュートで�
 
 ## ダウンロード（クリックですぐ落ちます）
 
-- [ユーザースクリプト版（Tampermonkey用）](https://github.com/imo-to/twitch-chatmute/releases/download/v1.3/twitch_chatmute.user.js)
-- [拡張機能版（Chrome / Edge用zip）](https://github.com/imo-to/twitch-chatmute/releases/download/v1.3/twitch-chatmute-extension-v1.3.zip)
-- [共有ミュートリスト（2,251人分・ユーザー名のみ）](https://github.com/imo-to/twitch-chatmute/releases/download/v1.3/mute-list_share_2026-11-24.json)
+- [ユーザースクリプト版（Tampermonkey用）](https://github.com/imo-to/twitch-chatmute/releases/download/v1.4/twitch_chatmute.user.js)
+- [拡張機能版（Chrome / Edge用zip）](https://github.com/imo-to/twitch-chatmute/releases/download/v1.4/twitch-chatmute-extension-v1.4.zip)
+- [共有ミュートリスト（2,251人分・ユーザー名のみ）](https://github.com/imo-to/twitch-chatmute/releases/download/v1.4/mute-list_share_2026-11-24.json)
 
 ## 入れ方
 
