@@ -2,7 +2,7 @@
 // @name         Twitch Chat mute +
 // @author       imouto
 // @namespace    https://greasyfork.org/users/imouto
-// @version      1.4
+// @version      1.5
 // @description ワンクリックでユーザーをその場で即座にミュートします。ミュート時はコメントも一緒に消します。おまけ機能アリ（ NGワード / ニコニコ弾幕 / ボーナス自動回収 など ）
 // @match        https://www.twitch.tv/*
 // @match        https://dokorisu.2saku.tech/*
@@ -3359,7 +3359,24 @@ a[href*="help.twitch.tv/s/article/plus-program"] {
     const bar = findReplyToolbar(btn, row);
     if (!bar || bar.dataset.tmReplyShifted === '1') return;
     bar.dataset.tmReplyShifted = '1';
-    bar.style.transform = 'translateX(-32px)';
+    // 既定は左へ32px。ボタンの位置が実測できる場合は、ミュートボタン
+    //   （行の右下・中心は右端から約21px／下端から約12px）と中心が揃うよう
+    //   縦横を実測で合わせ、返信ボタンがミュートボタンの真横に並ぶようにする。
+    let dx = -32, dy = 0;
+    safe(() => {
+      const rowRect = row.getBoundingClientRect();
+      const btnRect = btn.getBoundingClientRect();
+      if (rowRect && btnRect && btnRect.width > 0 && btnRect.height > 0) {
+        const muteCx = rowRect.right - 21;
+        const muteCy = rowRect.bottom - 12;
+        const targetCx = muteCx - (11 + btnRect.width / 2 + 4);
+        dx = Math.round(targetCx - (btnRect.left + btnRect.width / 2));
+        dy = Math.round(muteCy - (btnRect.top + btnRect.height / 2));
+        dx = Math.max(-80, Math.min(0, dx));
+        dy = Math.max(-60, Math.min(60, dy));
+      }
+    });
+    bar.style.transform = `translate(${dx}px, ${dy}px)`;
   }
 
   function refreshReplyShifts() {
