@@ -2,7 +2,7 @@
 // @name         Twitch Chat mute +
 // @author       imouto
 // @namespace    https://greasyfork.org/users/imouto
-// @version      1.2
+// @version      1.3
 // @description ワンクリックでユーザーをその場で即座にミュートします。ミュート時はコメントも一緒に消します。おまけ機能アリ（ NGワード / ニコニコ弾幕 / ボーナス自動回収 など ）
 // @match        https://www.twitch.tv/*
 // @match        https://dokorisu.2saku.tech/*
@@ -269,6 +269,7 @@
   const REPEAT_HIDE_KEY = 'tm_repeat_hide_enabled_v1'; // 繰り返しコメント非表示のON/OFF（デフォルトON）
   const ASCII_ART_HIDE_KEY = 'tm_ascii_art_hide_v1'; // アスキーアート非表示のON/OFF（デフォルトON）
   const SUB_ONLY_KEY    = 'tm_sub_only_mode_v1';       // サブスク限定モードのON/OFF（デフォルトOFF）
+  const REPLY_BTN_SHOW_KEY = 'tm_reply_btn_show_v1';   // 返信ボタン表示のON/OFF（デフォルトOFF＝非表示。ホバー時のミュートボタンと被るため）
   const STATS_KEY       = 'tm_filter_stats_v1';        // フィルターのヒット数（今日/累計）
   const CAROUSEL_HINT_KEY = 'tm_carousel_hint_done_v1'; // 左下カルーセルのヒントアニメーションを見せ終わったか
   const DANMAKU_KEY    = 'tm_danmaku_enabled_v1';      // 弾幕のON/OFF（デフォルトOFF。チャット入力欄下の弾幕ボタンで切替）
@@ -1931,6 +1932,9 @@
   function isAsciiArtHideEnabled() { return isFeatureEnabled(ASCII_ART_HIDE_KEY, true); }
   function setAsciiArtHideEnabled(v) { setFeatureEnabled(ASCII_ART_HIDE_KEY, v); }
 
+  function isReplyButtonShown() { return isFeatureEnabled(REPLY_BTN_SHOW_KEY, false); }
+  function setReplyButtonShown(v) { setFeatureEnabled(REPLY_BTN_SHOW_KEY, v); }
+
   // NGワード / 文字数 / 繰り返し のいずれかに引っかかるか（理由つき）
   //   繰り返し判定だけは plainText（スタンプを除いた生の文字）で判定する。
   //   スタンプだけのコメントは plainText が空になるため、連投されても消えない。
@@ -3173,15 +3177,6 @@
 }
 [data-tm-custom-hidden="1"] > * { display: none !important; }
 
-button[data-a-target="reply-button"],
-button[data-test-selector="reply-button"],
-button[aria-label*="reply" i],
-button[aria-label*="返信" i],
-[data-test-selector="message-context-reply-toggle"] {
-  display: none !important; visibility: hidden !important;
-  opacity: 0 !important; pointer-events: none !important;
-}
-
 #tm-unmute-panel .tm-page-list::-webkit-scrollbar,
 #tm-viewer-panel #tm-viewer-body::-webkit-scrollbar {
   width: var(--tm-scrollbar-w) !important;
@@ -3323,6 +3318,33 @@ a[href*="help.twitch.tv/s/article/plus-program"] {
     safe(() => {
       const s = document.getElementById(COMMUNITY_HIGHLIGHT_STYLE_ID);
       if (s) s.remove();
+    });
+  }
+
+  /* ================================================================
+     返信ボタンの表示制御（コメント設定「返信ボタンを表示」）
+     - OFF（デフォルト）: 返信ボタンを非表示にする
+       （ホバー時のミュートボタンがメッセージ右下にあり、返信ボタンと被るため）
+     - ON: 表示する。ただしミュートボタンと被らないよう左へ32pxずらす
+  ================================================================ */
+  const REPLY_BTN_STYLE_ID = 'tm-reply-btn-style';
+  const REPLY_BTN_SELECTORS =
+    'button[data-a-target="reply-button"],' +
+    'button[data-test-selector="reply-button"],' +
+    'button[aria-label*="reply" i],' +
+    'button[aria-label*="返信" i],' +
+    '[data-test-selector="message-context-reply-toggle"]';
+  function applyReplyButtonStyle() {
+    safe(() => {
+      let s = document.getElementById(REPLY_BTN_STYLE_ID);
+      if (!s) {
+        s = document.createElement('style');
+        s.id = REPLY_BTN_STYLE_ID;
+        document.head.appendChild(s);
+      }
+      s.textContent = isReplyButtonShown()
+        ? `${REPLY_BTN_SELECTORS} { transform: translateX(-32px) !important; }`
+        : `${REPLY_BTN_SELECTORS} { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; }`;
     });
   }
 
@@ -5658,6 +5680,9 @@ a[href*="help.twitch.tv/s/article/plus-program"] {
     frag.appendChild(buildSettingCheckRow('サブスク限定モード',
       isSubOnlyModeEnabled, setSubOnlyModeEnabled,
       () => safe(() => syncAllExistingChatRows())));
+    frag.appendChild(buildSettingCheckRow('返信ボタンを表示',
+      isReplyButtonShown, setReplyButtonShown,
+      () => safe(() => applyReplyButtonStyle())));
 
     // 文字数制限スライダー（0＝OFF、10字刻み、上限300字）
     const block = document.createElement('div');
@@ -6363,6 +6388,7 @@ a[href*="help.twitch.tv/s/article/plus-program"] {
     });
   }
   if (isCommunityHighlightHideEnabled()) enableCommunityHighlightHiding();
+  applyReplyButtonStyle();
 
   // 初回ロード後の遅延スキャン（SPA / マウント遅延対策）
   setTimeout(removeLeaderboardBanner, 800);
