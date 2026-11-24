@@ -2,7 +2,7 @@
 // @name         Twitch Chat mute +
 // @author       imouto
 // @namespace    https://greasyfork.org/users/imouto
-// @version      1.3
+// @version      1.4
 // @description ワンクリックでユーザーをその場で即座にミュートします。ミュート時はコメントも一緒に消します。おまけ機能アリ（ NGワード / ニコニコ弾幕 / ボーナス自動回収 など ）
 // @match        https://www.twitch.tv/*
 // @match        https://dokorisu.2saku.tech/*
@@ -2319,6 +2319,8 @@
             chatLine.dataset.tmPosSet = '1';
           }, undefined, 'position:relative');
         }
+        // 返信ボタン表示ONのときは、背景ごと左へずらしてミュートボタンと並べる
+        if (isReplyButtonShown()) safe(() => applyReplyShiftInRow(chatLine));
         // 表示された通常コメントは弾幕にも流す（ミュート/フィルターで消えた行はここに来ない）
         safe(() => spawnDanmaku(chatLine));
         if (chatLine.dataset) chatLine.dataset.tmProcessed = '1';
@@ -3334,6 +3336,50 @@ a[href*="help.twitch.tv/s/article/plus-program"] {
     'button[aria-label*="reply" i],' +
     'button[aria-label*="返信" i],' +
     '[data-test-selector="message-context-reply-toggle"]';
+  // 返信ボタンを「背景ごと」ずらすため、ボタン単体ではなく背景を持つ
+  //   外側のツールバー要素を探して動かす（ボタンだけ動かすと背景が
+  //   置いていかれて、アイコンと背景がずれて見えるため）。
+  function findReplyToolbar(btn, row) {
+    if (!btn) return null;
+    if (safe(() => btn.matches('[data-test-selector="message-context-reply-toggle"]'), false)) return btn;
+    const toggle = safe(() => btn.closest('[data-test-selector="message-context-reply-toggle"]'), null);
+    if (toggle && toggle !== btn) return toggle;
+    let el = btn.parentElement;
+    for (let i = 0; el && i < 6 && el !== row; i++) {
+      if (safe(() => window.getComputedStyle(el).position, '') === 'absolute') return el;
+      el = el.parentElement;
+    }
+    return btn;
+  }
+
+  function applyReplyShiftInRow(row) {
+    if (!row || !row.querySelector) return;
+    const btn = safe(() => row.querySelector(REPLY_BTN_SELECTORS), null);
+    if (!btn) return;
+    const bar = findReplyToolbar(btn, row);
+    if (!bar || bar.dataset.tmReplyShifted === '1') return;
+    bar.dataset.tmReplyShifted = '1';
+    bar.style.transform = 'translateX(-32px)';
+  }
+
+  function refreshReplyShifts() {
+    safe(() => {
+      document.querySelectorAll(REPLY_BTN_SELECTORS).forEach(btn => {
+        const row = safe(() => btn.closest('[data-a-target="chat-line-message"], [role="row"]'), null) || btn.parentElement;
+        if (row) applyReplyShiftInRow(row);
+      });
+    });
+  }
+
+  function clearReplyShifts() {
+    safe(() => {
+      document.querySelectorAll('[data-tm-reply-shifted="1"]').forEach(el => {
+        el.style.transform = '';
+        delete el.dataset.tmReplyShifted;
+      });
+    });
+  }
+
   function applyReplyButtonStyle() {
     safe(() => {
       let s = document.getElementById(REPLY_BTN_STYLE_ID);
@@ -3342,9 +3388,15 @@ a[href*="help.twitch.tv/s/article/plus-program"] {
         s.id = REPLY_BTN_STYLE_ID;
         document.head.appendChild(s);
       }
-      s.textContent = isReplyButtonShown()
-        ? `${REPLY_BTN_SELECTORS} { transform: translateX(-32px) !important; }`
-        : `${REPLY_BTN_SELECTORS} { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; }`;
+      if (isReplyButtonShown()) {
+        // 表示ON: 非表示CSSは外し、ツールバーを背景ごと左へずらして
+        //   右下のミュートボタンと横並びにする（JSで要素を特定して動かす）
+        s.textContent = '';
+        refreshReplyShifts();
+      } else {
+        s.textContent = `${REPLY_BTN_SELECTORS} { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; }`;
+        clearReplyShifts();
+      }
     });
   }
 
