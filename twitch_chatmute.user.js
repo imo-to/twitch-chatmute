@@ -2,7 +2,7 @@
 // @name         Twitch Chat mute +
 // @author       imouto
 // @namespace    https://greasyfork.org/users/imouto
-// @version      1.1
+// @version      1.2
 // @description ワンクリックでユーザーをその場で即座にミュートします。ミュート時はコメントも一緒に消します。おまけ機能アリ（ NGワード / ニコニコ弾幕 / ボーナス自動回収 など ）
 // @match        https://www.twitch.tv/*
 // @match        https://dokorisu.2saku.tech/*
@@ -613,6 +613,11 @@
     }
     // 自タブの書き込みを記録して、storage イベントのループバックを防ぐ
     _lastLocalPayload = payload;
+    // 同一タブ内で別インスタンス（拡張機能版とTampermonkey版の併用など）が
+    //   動いている場合、storage イベントは同一ドキュメント内では発火しない。
+    //   そのため保存のたびにカスタムイベントでも通知する
+    //   （受け側は _lastLocalPayload との比較で自分の保存分を無視する）。
+    safe(() => document.dispatchEvent(new CustomEvent('tm-chatmute-state-saved')));
   }
 
   (function loadAll() {
@@ -684,6 +689,25 @@
       safeExec(() => syncAllExistingChatRows(), undefined, 'syncAll after storage');
       showToast('🔄 他タブと同期しました');
     }, undefined, 'storage handler');
+  });
+
+  // 同一ドキュメント内同期: 拡張機能版とTampermonkey版を併用していると、
+  //   片方でミュートしても、もう片方のパネルには storage イベントが届かず
+  //   リストに反映されない（再読み込みで直る）問題への対策。
+  //   persistMutedState() が発するカスタムイベントを受けて読み直す。
+  document.addEventListener('tm-chatmute-state-saved', () => {
+    safeExec(() => {
+      const raw = lsGet(STORAGE_KEY);
+      if (!raw || raw === _lastLocalPayload) return; // 自分の保存は無視
+      let state = null;
+      try { state = coerceState(JSON.parse(raw)); } catch (err) { return; }
+      if (!state) return;
+      rebuildFromState(state);
+      invalidateFilterCache();
+      if (panelSnapshot) panelSnapshot = [...mutedUsers].reverse();
+      if (panelElem) renderPage(true);
+      safeExec(() => syncAllExistingChatRows(), undefined, 'syncAll after local sync');
+    }, undefined, 'local sync handler');
   });
 
   /* ================================================================
@@ -4584,6 +4608,20 @@ a[href*="help.twitch.tv/s/article/plus-program"] {
   function toggleUnmuteUI(e) {
     if (e && e.stopPropagation) e.stopPropagation();
     if (panelElem) { closePanel(); return; }
+
+    // 開く直前に保存状態を読み直す（同一タブ内の別インスタンスが変更した内容を、
+    //   イベント同期が無い相手でも開いた瞬間に反映するため）
+    safeExec(() => {
+      const raw = lsGet(STORAGE_KEY);
+      if (raw && raw !== _lastLocalPayload) {
+        const st = coerceState(JSON.parse(raw));
+        if (st) {
+          rebuildFromState(st);
+          invalidateFilterCache();
+          panelSnapshot = null;
+        }
+      }
+    }, undefined, 'reload state on panel open');
 
     const panel = document.createElement('div');
     panelElem = panel;
